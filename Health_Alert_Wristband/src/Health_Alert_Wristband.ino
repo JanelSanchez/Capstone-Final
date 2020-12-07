@@ -20,9 +20,10 @@
 #include "algorithm_by_RF.h"
 #include "max30102.h"
 #include "MAX30105.h"                                     // MAX3010x library
-
+#include <math.h>
 #include <Adafruit_GFX.h>                                 // OLED Library
 #include <Adafruit_SSD1306.h>                             // OLED Library
+#include <Adafruit_BME280.h>
 
 TCPClient TheClient; 
 
@@ -31,11 +32,12 @@ Adafruit_MQTT_SPARK mqtt(&TheClient,AIO_SERVER,AIO_SERVERPORT,AIO_USERNAME,AIO_K
 Adafruit_MQTT_Publish heartRate = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/HR");
 Adafruit_MQTT_Publish oxygen = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/O2");
 Adafruit_MQTT_Publish button = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/alertButton");
-
+Adafruit_MQTT_Publish feedvarbodytemperature = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/BodyTemperature");  //sending to
+Adafruit_MQTT_Publish feedvarfalls = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/Fall Dectection");  //sending to
 
 #define OLED_RESET D4
 Adafruit_SSD1306 display(OLED_RESET);
-
+Adafruit_BME280 bme;
 
 // Interrupt pin
 const byte oxiInt = D8;                                   // pin connected to MAX30102 INT
@@ -51,6 +53,29 @@ bool isWristPlaced = false;
 unsigned long lastDisplayTime;
 unsigned long lastPublishTime;
 unsigned long last;
+double varBodyTempC;
+float varBodyTempF;
+int status;
+const int MPU_ADDR = 0x68;
+
+
+byte accel_x_h, accel_x_l; //X Data/var for individual bytes
+int16_t accel_x; //X Data var to store the x-acceleration
+
+byte accel_y_h, accel_y_l; //Y Data/var for individual bytes
+int16_t accel_y; //Y Data/var to store the x-acceleration
+
+byte accel_z_h, accel_z_l; //Z Data/var for individual bytes
+int16_t accel_z; //Z Data/var to store the x-acceleration
+
+  float accelXG;
+  float accelYG;
+  float accelZG;  
+  float accelTotal;
+  const int sampleCount = 100;
+  float dataArray[sampleCount];
+  float maxValue; 
+
 
 const int buttonPin = D2;
 
@@ -78,6 +103,19 @@ void setup() {
   maxim_max30102_init();                                  //initialize the MAX30102
   old_n_spo2=0.0;
 
+  //MPU6050 setup
+  Wire.begin(); //begin I2C communication
+  Wire.beginTransmission(MPU_ADDR); //begin transmission to MPU
+  Wire.write(0x6B); //select and write to PWR_MGMT1 register
+  Wire.write(0); //set to 0 (wakes up MPU)
+  Wire.endTransmission(true); //end transmission and close connection
+  
+  status = bme.begin(0x76);
+  if (status==false) {
+    Serial.printf("failed to open BME");
+  } 
+
+
   sync_my_time();
 }
 
@@ -85,9 +123,11 @@ void setup() {
 void loop() {
   MQTT_ping();
   processHRandSPO2();
-  displayPrint(hr,spo2);
+  getTemperature();
+  getMaxAccel();  
+  displayPrint();
   MQTT_connect();
-  publish(hr,spo2);
+  publish();
   pushAlertButton();
 }
 
@@ -138,7 +178,7 @@ void sync_my_time () {
   waitUntil(Particle.syncTimeDone);
 }
 
-void displayPrint (int32_t dhr, float dspo2) {
+void displayPrint () {
   String DateTime, DateOnly, TimeOnly, YearOnly;
   char currentDate[11], currentTime[9], currentYear[5];
 
@@ -166,15 +206,19 @@ void displayPrint (int32_t dhr, float dspo2) {
       Serial.printf("Display Time: %s \n", currentTime);
       display.printf("Time: %s\n", currentTime);
 
-      if (dhr>1 && dspo2>1) {
+      if (hr>1 && spo2>1) {
         display.setTextColor(WHITE);
-        Serial.printf("Display Heart Rate: %i \n", dhr);
+        Serial.printf("Display Heart Rate: %i \n", hr);
         display.println();
-        display.printf("Heart Rate: %i \n", dhr);
+        display.printf("Heart Rate: %i \n", hr);
 
         display.setTextColor(WHITE);
-        Serial.printf("Display Oxygen: %0.1f \n", dspo2);
-        display.printf("Oxygen: %0.1f \n", dspo2);
+        Serial.printf("Display Oxygen: %0.1f \n", spo2);
+        display.printf("Oxygen: %0.1f \n", spo2);
+
+        display.setTextColor(WHITE);
+        Serial.printf("Temp = %.02f  \n", varBodyTempF);   
+        display.printf("Temp = %.02f  \n", varBodyTempF);  
       }
       else {
         display.setTextColor(WHITE);
@@ -188,14 +232,17 @@ void displayPrint (int32_t dhr, float dspo2) {
   }
 }
 
-void publish (int32_t phr, float pspo2) {
-  if (phr>1 && pspo2>1) {
+void publish () {
+  if (hr>1 && spo2>1) {
     if ((millis()-lastPublishTime)>10000) {
       if(mqtt.Update()) {
-        heartRate.publish(phr);
-        Serial.printf("Publishing HR: %i \n", phr);
-        oxygen.publish(pspo2);
-        Serial.printf("Publishing O2: %0.1f \n", pspo2);
+        heartRate.publish(hr);
+        Serial.printf("Publishing HR: %i \n", hr);
+        oxygen.publish(spo2);
+        Serial.printf("Publishing O2: %0.1f \n", spo2);
+        feedvarbodytemperature.publish(varBodyTempF); 
+            feedvarfalls.publish(accelTotal);            
+            Serial.printf("Publishing Temp: %f \n ", varBodyTempF); //no longer publishing tempF
       }
       lastPublishTime = millis();
     }
@@ -217,6 +264,57 @@ void pushAlertButton () {
   lastButton = buttonState;
   }
 }
+
+void getMaxAccel()  {
+ maxValue = 0; 
+   for(int i=0;i<sampleCount;i++){     
+     getMPUData();
+     if(accelTotal>maxValue) {
+      maxValue=accelTotal;
+     }
+     dataArray[i] = accelTotal;
+     delay(10);
+   }
+  Serial.printf("Read max value =%f\n", maxValue);
+}
+
+void getTemperature () {
+
+    //convert Celsius to F 
+    //varTempF = ((varTempC*9)/5)+32;
+    varBodyTempC = bme.readTemperature();
+    varBodyTempF = map(varBodyTempC,27.8, 30.8, 97.0, 99.0);
+    Serial.printf("Temp = %.02f \n temp = %.02f  \n", varBodyTempC, varBodyTempF);    
+    delay(5000);
+
+    
+}
+
+void getMPUData(){ 
+  Wire.beginTransmission(MPU_ADDR);
+  Wire.write (0x3B);
+  Wire.endTransmission(false);
+  Wire.requestFrom(MPU_ADDR, 6, true);
+  accel_x_h = Wire.read(); //x accel MSB
+  accel_x_l = Wire.read(); //x accel LSB
+  accel_x = accel_x_h << 8 | accel_x_l;
+  accelXG=accel_x/17100.0;
+  
+  accel_y_h = Wire.read(); //y accel MSB
+  accel_y_l = Wire.read(); //y accel LSB
+  accel_y = accel_y_h << 8 | accel_y_l;
+  accelYG=accel_y/16150.0;
+
+  accel_z_h = Wire.read(); //z accel MSB
+  accel_z_l = Wire.read(); //z accel LSB
+  accel_z = accel_z_h << 8 | accel_z_l;
+  accelZG=accel_z/15700.0;
+
+  accelTotal = sqrt(pow(accelXG,2)+pow(accelYG,2)+pow(accelZG,2));
+  Serial.printf("accelTotalf=%f \n",accelTotal);
+  
+
+}  
 
 void MQTT_connect() {
   int8_t ret;
