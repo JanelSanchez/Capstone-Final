@@ -17,10 +17,10 @@
 
 #include <Wire.h>
 #include <SPI.h>
+#include <math.h>
 #include "algorithm_by_RF.h"
 #include "max30102.h"
 #include "MAX30105.h"                                     // MAX3010x library
-#include <math.h>
 #include <Adafruit_GFX.h>                                 // OLED Library
 #include <Adafruit_SSD1306.h>                             // OLED Library
 #include <Adafruit_BME280.h>
@@ -53,11 +53,12 @@ bool isWristPlaced = false;
 unsigned long lastDisplayTime;
 unsigned long lastPublishTime;
 unsigned long last;
+
 double varBodyTempC;
 float varBodyTempF;
 int status;
-const int MPU_ADDR = 0x68;
 
+const int MPU_ADDR = 0x68;
 
 byte accel_x_h, accel_x_l; //X Data/var for individual bytes
 int16_t accel_x; //X Data var to store the x-acceleration
@@ -68,16 +69,16 @@ int16_t accel_y; //Y Data/var to store the x-acceleration
 byte accel_z_h, accel_z_l; //Z Data/var for individual bytes
 int16_t accel_z; //Z Data/var to store the x-acceleration
 
-  float accelXG;
-  float accelYG;
-  float accelZG;  
-  float accelTotal;
-  const int sampleCount = 100;
-  float dataArray[sampleCount];
-  float maxValue; 
-
+float accelXG;
+float accelYG;
+float accelZG;  
+float accelTotal;
+const int sampleCount = 100;
+float dataArray[sampleCount];
+float maxValue; 
 
 const int buttonPin = D2;
+
 
 void setup() {
   display.begin(SSD1306_SWITCHCAPVCC, 0x3C);              // Start the OLED display
@@ -115,7 +116,6 @@ void setup() {
     Serial.printf("failed to open BME");
   } 
 
-
   sync_my_time();
 }
 
@@ -133,7 +133,7 @@ void loop() {
 
 void processHRandSPO2(){
   long irValue = particleSensor.getIR();                  // Reading the IR value it will permit us to know if there's a finger on the sensor or not
-  Serial.println(irValue);
+  Serial.printf("irValue: %i\n", irValue);
   if (irValue > 50000){
     if(isWristPlaced == false) {
       isWristPlaced = true;
@@ -217,8 +217,8 @@ void displayPrint () {
         display.printf("Oxygen: %0.1f \n", spo2);
 
         display.setTextColor(WHITE);
-        Serial.printf("Temp = %.02f  \n", varBodyTempF);   
-        display.printf("Temp = %.02f  \n", varBodyTempF);  
+        Serial.printf("Display Temp: %0.1f  \n", varBodyTempF);   
+        display.printf("Temp: %0.1f  \n", varBodyTempF);  
       }
       else {
         display.setTextColor(WHITE);
@@ -238,11 +238,17 @@ void publish () {
       if(mqtt.Update()) {
         heartRate.publish(hr);
         Serial.printf("Publishing HR: %i \n", hr);
+
         oxygen.publish(spo2);
         Serial.printf("Publishing O2: %0.1f \n", spo2);
-        feedvarbodytemperature.publish(varBodyTempF); 
-            feedvarfalls.publish(accelTotal);            
-            Serial.printf("Publishing Temp: %f \n ", varBodyTempF); //no longer publishing tempF
+
+        feedvarbodytemperature.publish(varBodyTempF);
+        Serial.printf("Publishing Temp: %f \n ", varBodyTempF); 
+
+        if(accelTotal>=2) {
+          feedvarfalls.publish(accelTotal);
+          Serial.printf("Publishing Fall detected \n");  
+        }
       }
       lastPublishTime = millis();
     }
@@ -265,36 +271,12 @@ void pushAlertButton () {
   }
 }
 
-void getMaxAccel()  {
- maxValue = 0; 
-   for(int i=0;i<sampleCount;i++){     
-     getMPUData();
-     if(accelTotal>maxValue) {
-      maxValue=accelTotal;
-     }
-     dataArray[i] = accelTotal;
-     delay(10);
-   }
-  Serial.printf("Read max value =%f\n", maxValue);
-}
-
-void getTemperature () {
-
-    //convert Celsius to F 
-    //varTempF = ((varTempC*9)/5)+32;
-    varBodyTempC = bme.readTemperature();
-    varBodyTempF = map(varBodyTempC,27.8, 30.8, 97.0, 99.0);
-    Serial.printf("Temp = %.02f \n temp = %.02f  \n", varBodyTempC, varBodyTempF);    
-    delay(5000);
-
-    
-}
-
 void getMPUData(){ 
   Wire.beginTransmission(MPU_ADDR);
   Wire.write (0x3B);
   Wire.endTransmission(false);
   Wire.requestFrom(MPU_ADDR, 6, true);
+
   accel_x_h = Wire.read(); //x accel MSB
   accel_x_l = Wire.read(); //x accel LSB
   accel_x = accel_x_h << 8 | accel_x_l;
@@ -311,10 +293,30 @@ void getMPUData(){
   accelZG=accel_z/15700.0;
 
   accelTotal = sqrt(pow(accelXG,2)+pow(accelYG,2)+pow(accelZG,2));
-  Serial.printf("accelTotalf=%f \n",accelTotal);
-  
-
+  Serial.printf("Accel Total Value: %0.1f \n", accelTotal);
 }  
+
+void getMaxAccel()  {
+ maxValue = 0; 
+   for(int i=0;i<sampleCount;i++){     
+     getMPUData();
+     if(accelTotal>maxValue) {
+      maxValue=accelTotal;
+     }
+     dataArray[i] = accelTotal;
+    //  delay(10);
+   }
+  Serial.printf("Max Value: %f\n", maxValue);
+}
+
+void getTemperature() {
+  //convert Celsius to F 
+  //varTempF = ((varTempC*9)/5)+32;
+  varBodyTempC = bme.readTemperature();
+  varBodyTempF = map(varBodyTempC,27.8, 30.8, 97.0, 99.0);
+  Serial.printf("Temp Value:%0.1f \n temp = %.02f \n", varBodyTempF);    
+  // delay(5000);   
+}
 
 void MQTT_connect() {
   int8_t ret;
