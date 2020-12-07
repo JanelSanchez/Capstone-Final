@@ -3,7 +3,7 @@
 /******************************************************/
 
 #include "Particle.h"
-#line 1 "c:/Users/Janel/Documents/IoT/Capstone-Final/Health_Alert_Wristband/src/Health_Alert_Wristband.ino"
+#line 1 "c:/Users/ddcio/Documents/IoT/Capstone-Final/Health_Alert_Wristband/src/Health_Alert_Wristband.ino"
 /*
  * Project: Capstone JAS Part
  * Description: HR/O2 with Alert Button
@@ -17,7 +17,7 @@
 
 #include "Adafruit_MQTT/Adafruit_MQTT.h" 
 #include "Adafruit_MQTT/Adafruit_MQTT_SPARK.h" 
-#include "Adafruit_MQTT/Adafruit_MQTT.h" 
+// #include "Adafruit_MQTT/Adafruit_MQTT.h" 
 
 #include "credentials.h"
 
@@ -39,11 +39,10 @@ void displayPrint ();
 void publish ();
 void pushAlertButton ();
 void getMPUData();
-void getMaxAccel();
 void getTemperature();
 void MQTT_connect();
 void MQTT_ping();
-#line 28 "c:/Users/Janel/Documents/IoT/Capstone-Final/Health_Alert_Wristband/src/Health_Alert_Wristband.ino"
+#line 28 "c:/Users/ddcio/Documents/IoT/Capstone-Final/Health_Alert_Wristband/src/Health_Alert_Wristband.ino"
 TCPClient TheClient; 
 
 Adafruit_MQTT_SPARK mqtt(&TheClient,AIO_SERVER,AIO_SERVERPORT,AIO_USERNAME,AIO_KEY); 
@@ -92,9 +91,6 @@ float accelXG;
 float accelYG;
 float accelZG;  
 float accelTotal;
-const int sampleCount = 100;
-float dataArray[sampleCount];
-float maxValue; 
 
 const int buttonPin = D2;
 
@@ -136,14 +132,18 @@ void setup() {
   } 
 
   sync_my_time();
+
+  // MQTT_connect(); 
+  // delay(5000);
 }
 
 //Continuously taking samples from MAX30102.  Heart rate and SpO2 are calculated every ST seconds
 void loop() {
-  MQTT_ping();
-  processHRandSPO2();
+  // MQTT_ping();
+  getMPUData();
+  // delay(100);
   getTemperature();
-  getMaxAccel();  
+  processHRandSPO2();
   displayPrint();
   MQTT_connect();
   publish();
@@ -152,7 +152,7 @@ void loop() {
 
 void processHRandSPO2(){
   long irValue = particleSensor.getIR();                  // Reading the IR value it will permit us to know if there's a finger on the sensor or not
-  Serial.printf("irValue: %i\n", irValue);
+  // Serial.printf("irValue: %i\n", irValue);
   if (irValue > 50000){
     if(isWristPlaced == false) {
       isWristPlaced = true;
@@ -170,7 +170,10 @@ void processHRandSPO2(){
       while(digitalRead(oxiInt)==1){                      //wait until the interrupt pin asserts
          yield();
       }
-      
+      // while (particleSensor.available() == false) {//do we have new data?
+      //   particleSensor.check(); //Check the sensor for new data
+      // }
+
       //IMPORTANT: 
       //IR and LED are swapped here for MH-ET MAX30102. Check your vendor for MAX30102
       //and use this or the commented-out function call.
@@ -186,7 +189,7 @@ void processHRandSPO2(){
   }
   else {
     isWristPlaced = false;
-    Serial.println("No wrist detected");
+    // Serial.println("No wrist detected");
   }
 }
 
@@ -220,24 +223,27 @@ void displayPrint () {
       display.setTextSize(1);
       display.setCursor(0,0);
       display.setTextColor(BLACK, WHITE);
-      Serial.printf("Display Date: %s %s \n", currentDate,currentYear);
+      // Serial.printf("Display Date: %s %s \n", currentDate,currentYear);
       display.printf("Date: %s %s", currentDate,currentYear);
-      Serial.printf("Display Time: %s \n", currentTime);
+      // Serial.printf("Display Time: %s \n", currentTime);
       display.printf("Time: %s\n", currentTime);
 
       if (hr>1 && spo2>1) {
         display.setTextColor(WHITE);
-        Serial.printf("Display Heart Rate: %i \n", hr);
+        // Serial.printf("Display Heart Rate: %i \n", hr);
         display.println();
         display.printf("Heart Rate: %i \n", hr);
 
         display.setTextColor(WHITE);
-        Serial.printf("Display Oxygen: %0.1f \n", spo2);
+        // Serial.printf("Display Oxygen: %0.1f \n", spo2);
         display.printf("Oxygen: %0.1f \n", spo2);
 
         display.setTextColor(WHITE);
-        Serial.printf("Display Temp: %0.1f  \n", varBodyTempF);   
+        // Serial.printf("Display Temp: %0.1f  \n", varBodyTempF);   
         display.printf("Temp: %0.1f  \n", varBodyTempF);  
+
+        display.setTextColor(WHITE);
+        display.printf("Accel Total: %0.2f \n", accelTotal);
       }
       else {
         display.setTextColor(WHITE);
@@ -256,17 +262,17 @@ void publish () {
     if ((millis()-lastPublishTime)>10000) {
       if(mqtt.Update()) {
         heartRate.publish(hr);
-        Serial.printf("Publishing HR: %i \n", hr);
+        // Serial.printf("Publishing HR: %i \n", hr);
 
         oxygen.publish(spo2);
-        Serial.printf("Publishing O2: %0.1f \n", spo2);
+        // Serial.printf("Publishing O2: %0.1f \n", spo2);
 
         feedvarbodytemperature.publish(varBodyTempF);
-        Serial.printf("Publishing Temp: %f \n ", varBodyTempF); 
+        // Serial.printf("Publishing Temp: %f \n ", varBodyTempF); 
 
         if(accelTotal>=2) {
           feedvarfalls.publish(accelTotal);
-          Serial.printf("Publishing Fall detected \n");  
+          // Serial.printf("Publishing Fall detected \n");  
         }
       }
       lastPublishTime = millis();
@@ -283,7 +289,7 @@ void pushAlertButton () {
     if(buttonState == HIGH) {
       if(mqtt.Update()) {
         button.publish(buttonState);
-        Serial.printf("Alert Button Pressed \n"); 
+        // Serial.printf("Alert Button Pressed \n"); 
       } 
     }
   lastButton = buttonState;
@@ -312,28 +318,15 @@ void getMPUData(){
   accelZG=accel_z/15700.0;
 
   accelTotal = sqrt(pow(accelXG,2)+pow(accelYG,2)+pow(accelZG,2));
-  Serial.printf("Accel Total Value: %0.1f \n", accelTotal);
+  // Serial.printf("Accel Total Value: %0.3f \n", accelTotal);
 }  
-
-void getMaxAccel()  {
- maxValue = 0; 
-   for(int i=0;i<sampleCount;i++){     
-     getMPUData();
-     if(accelTotal>maxValue) {
-      maxValue=accelTotal;
-     }
-     dataArray[i] = accelTotal;
-    //  delay(10);
-   }
-  Serial.printf("Max Value: %f\n", maxValue);
-}
 
 void getTemperature() {
   //convert Celsius to F 
   //varTempF = ((varTempC*9)/5)+32;
   varBodyTempC = bme.readTemperature();
   varBodyTempF = map(varBodyTempC,27.8, 30.8, 97.0, 99.0);
-  Serial.printf("Temp Value:%0.1f \n temp = %.02f \n", varBodyTempF);    
+  // Serial.printf("Temp Value: %0.1f\n", varBodyTempF);    
   // delay(5000);   
 }
 
@@ -345,22 +338,22 @@ void MQTT_connect() {
     return;
   }
  
-  Serial.print("Connecting to MQTT... ");
+  // Serial.print("Connecting to MQTT... ");
  
   while ((ret = mqtt.connect()) != 0) { // connect will return 0 for connected
        Serial.println(mqtt.connectErrorString(ret));
-       Serial.println("Retrying MQTT connection in 5 seconds...");
+      //  Serial.println("Retrying MQTT connection in 5 seconds...");
        mqtt.disconnect();
        delay(5000);  // wait 5 seconds
   }
-  Serial.println("MQTT Connected!");
+  // Serial.println("MQTT Connected!");
 }
 
 void MQTT_ping() {
   if ((millis()-last)>120000) {
-    Serial.printf("Pinging MQTT \n");
+    // Serial.printf("Pinging MQTT \n");
     if(! mqtt.ping()) {
-      Serial.printf("Disconnecting \n");
+      // Serial.printf("Disconnecting \n");
       mqtt.disconnect();
     }
     last = millis();
