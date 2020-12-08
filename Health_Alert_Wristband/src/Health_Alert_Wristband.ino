@@ -1,11 +1,10 @@
 /*
- * Project: Capstone JAS Part
- * Description: HR/O2 with Alert Button
- * Author: Janel Sanchez
- * Date: 07-Dec-2020
+ * Project: Capstone Combined
+ * Description: HR/O2/TEMP with Alert Button and Fall Detection
+ * Author: Constance Banuelos and Janel Sanchez
+ * Date: 08-Dec-2020
  */
 
-// SYSTEM_MODE(SEMI_AUTOMATIC);
 
 #include <Adafruit_MQTT.h>
 
@@ -24,6 +23,7 @@
 #include <Adafruit_GFX.h>                                 // OLED Library
 #include <Adafruit_SSD1306.h>                             // OLED Library
 #include <Adafruit_BME280.h>
+
 
 TCPClient TheClient; 
 
@@ -110,31 +110,28 @@ void setup() {
   
   status = bme.begin(0x76);
   if (status==false) {
-    Serial.printf("failed to open BME");
+    Serial.printf("Failed to open BME");
   } 
 
   sync_my_time();
-
-  // MQTT_connect(); 
-  // delay(5000);
 }
 
 //Continuously taking samples from MAX30102.  Heart rate and SpO2 are calculated every ST seconds
 void loop() {
-  // MQTT_ping();
   getMPUData();
-  // delay(100);
   getTemperature();
   processHRandSPO2();
   displayPrint();
   MQTT_connect();
+  MQTT_ping();
   publish();
   pushAlertButton();
+  delay(1500);
 }
 
 void processHRandSPO2(){
   long irValue = particleSensor.getIR();                  // Reading the IR value it will permit us to know if there's a finger on the sensor or not
-  // Serial.printf("irValue: %i\n", irValue);
+  Serial.printf("irValue: %i\n", irValue);
   if (irValue > 50000){
     if(isWristPlaced == false) {
       isWristPlaced = true;
@@ -150,7 +147,7 @@ void processHRandSPO2(){
     for(i=0;i<BUFFER_SIZE;i++)
     {
       while(digitalRead(oxiInt)==1){                      //wait until the interrupt pin asserts
-         yield();
+        //  yield();
       }
       // while (particleSensor.available() == false) {//do we have new data?
       //   particleSensor.check(); //Check the sensor for new data
@@ -165,6 +162,10 @@ void processHRandSPO2(){
   
     //calculate heart rate and SpO2 after BUFFER_SIZE samples (ST seconds of samples) using Robert's method
     rf_heart_rate_and_oxygen_saturation(aun_ir_buffer, BUFFER_SIZE, aun_red_buffer, &n_spo2, &ch_spo2_valid, &n_heart_rate, &ch_hr_valid, &ratio, &correl); 
+    Serial.printf("n_spo2: %0.1f\n", n_spo2);
+    Serial.printf("ch_spo2_valid: %i\n", ch_spo2_valid);
+    Serial.printf("n_heart_rate: %i \n", n_heart_rate);
+    Serial.printf("ch_hr_valid: %i\n", ch_hr_valid);
 
     hr = n_heart_rate;
     spo2 = n_spo2;
@@ -244,17 +245,17 @@ void publish () {
     if ((millis()-lastPublishTime)>10000) {
       if(mqtt.Update()) {
         heartRate.publish(hr);
-        // Serial.printf("Publishing HR: %i \n", hr);
+        Serial.printf("Publishing HR: %i \n", hr);
 
         oxygen.publish(spo2);
-        // Serial.printf("Publishing O2: %0.1f \n", spo2);
+        Serial.printf("Publishing O2: %0.1f \n", spo2);
 
         feedvarbodytemperature.publish(varBodyTempF);
-        // Serial.printf("Publishing Temp: %f \n ", varBodyTempF); 
+        Serial.printf("Publishing Temp: %f \n ", varBodyTempF); 
 
         if(accelTotal>=2) {
           feedvarfalls.publish(accelTotal);
-          // Serial.printf("Publishing Fall detected \n");  
+          Serial.printf("Publishing Fall detected \n");  
         }
       }
       lastPublishTime = millis();
@@ -271,7 +272,7 @@ void pushAlertButton () {
     if(buttonState == HIGH) {
       if(mqtt.Update()) {
         button.publish(buttonState);
-        // Serial.printf("Alert Button Pressed \n"); 
+        Serial.printf("Alert Button Pressed \n"); 
       } 
     }
   lastButton = buttonState;
@@ -300,7 +301,7 @@ void getMPUData(){
   accelZG=accel_z/15700.0;
 
   accelTotal = sqrt(pow(accelXG,2)+pow(accelYG,2)+pow(accelZG,2));
-  // Serial.printf("Accel Total Value: %0.3f \n", accelTotal);
+  Serial.printf("Accel Total Value: %0.3f \n", accelTotal);
 }  
 
 void getTemperature() {
@@ -320,7 +321,7 @@ void MQTT_connect() {
     return;
   }
  
-  // Serial.print("Connecting to MQTT... ");
+  Serial.print("Connecting to MQTT... ");
  
   while ((ret = mqtt.connect()) != 0) { // connect will return 0 for connected
        Serial.println(mqtt.connectErrorString(ret));
@@ -328,14 +329,14 @@ void MQTT_connect() {
        mqtt.disconnect();
        delay(5000);  // wait 5 seconds
   }
-  // Serial.println("MQTT Connected!");
+  Serial.println("MQTT Connected!");
 }
 
 void MQTT_ping() {
   if ((millis()-last)>120000) {
-    // Serial.printf("Pinging MQTT \n");
+    Serial.printf("Pinging MQTT \n");
     if(! mqtt.ping()) {
-      // Serial.printf("Disconnecting \n");
+      Serial.printf("Disconnecting \n");
       mqtt.disconnect();
     }
     last = millis();
