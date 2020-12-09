@@ -20,9 +20,9 @@
 
 #include "credentials.h"
 
-#include <Wire.h>
-#include <SPI.h>
-#include <math.h>
+// #include <Wire.h>
+// #include <SPI.h>
+// #include <math.h>
 #include "algorithm_by_RF.h"
 #include "max30102.h"
 #include "MAX30105.h"                                     // MAX3010x library
@@ -92,6 +92,10 @@ float accelYG;
 float accelZG;  
 float accelTotal;
 
+bool fallDetected = false;
+float fallValue = 0.0;
+const float fallThreshold = 1.5;
+
 const int buttonPin = D2;
 
 
@@ -99,10 +103,10 @@ void setup() {
   display.begin(SSD1306_SWITCHCAPVCC, 0x3C);              // Start the OLED display
   display.clearDisplay();
   display.display();
-  display.setTextSize(1);
+  display.setTextSize(2);
   display.setCursor(0,0);
   display.setTextColor(WHITE);
-  display.println("Place on wrist \nand wait...");
+  display.println("Place on\nwrist and\nwait...");
   display.display();
 
   pinMode (buttonPin, INPUT_PULLDOWN);                    //pin D2 connects to the button
@@ -140,11 +144,13 @@ void loop() {
   getTemperature();
   processHRandSPO2();
   displayPrint();
-  MQTT_connect();
-  MQTT_ping();
+  if(!isWristPlaced) {
+    MQTT_connect();
+    MQTT_ping();
+  }
   publish();
   pushAlertButton();
-  delay(1500);
+  delay(100);
 }
 
 void processHRandSPO2(){
@@ -221,30 +227,30 @@ void displayPrint () {
       display.clearDisplay();
       display.display();
 
-      display.setTextSize(1);
+      display.setTextSize(2);
       display.setCursor(0,0);
-      display.setTextColor(BLACK, WHITE);
-      // Serial.printf("Display Date: %s %s \n", currentDate,currentYear);
-      display.printf("Date: %s %s", currentDate,currentYear);
-      // Serial.printf("Display Time: %s \n", currentTime);
-      display.printf("Time: %s\n", currentTime);
+      // display.setTextColor(BLACK, WHITE);
+      // // Serial.printf("Display Date: %s %s \n", currentDate,currentYear);
+      // display.printf("Date: %s %s", currentDate,currentYear);
+      // // Serial.printf("Display Time: %s \n", currentTime);
+      // display.printf("Time: %s\n", currentTime);
 
       if (hr>1 && spo2>1) {
         display.setTextColor(WHITE);
         // Serial.printf("Display Heart Rate: %i \n", hr);
         display.println();
-        display.printf("Heart Rate: %i \n", hr);
+        display.printf("HR: %i \n", hr);
 
         display.setTextColor(WHITE);
         // Serial.printf("Display Oxygen: %0.1f \n", spo2);
-        display.printf("Oxygen: %0.1f \n", spo2);
+        display.printf("O2: %0.1f \n", spo2);
 
         display.setTextColor(WHITE);
         // Serial.printf("Display Temp: %0.1f  \n", varBodyTempF);   
-        display.printf("Temp: %0.1f  \n", varBodyTempF);  
+        display.printf("T:  %0.1f  \n", varBodyTempF);  
 
-        display.setTextColor(WHITE);
-        display.printf("Accel Total: %0.2f \n", accelTotal);
+        // display.setTextColor(WHITE);
+        // display.printf("Accel Total: %0.2f \n", fallValue);
       }
       else {
         display.setTextColor(WHITE);
@@ -259,25 +265,27 @@ void displayPrint () {
 }
 
 void publish () {
-  if (hr>1 && spo2>1) {
-    if ((millis()-lastPublishTime)>10000) {
-      if(mqtt.Update()) {
+  if ((millis()-lastPublishTime)>10000) {
+    if(mqtt.Update()) {
+      if (hr>1 && spo2>1) {
         heartRate.publish(hr);
         Serial.printf("Publishing HR: %i \n", hr);
 
         oxygen.publish(spo2);
         Serial.printf("Publishing O2: %0.1f \n", spo2);
+      } 
 
-        feedvarbodytemperature.publish(varBodyTempF);
-        Serial.printf("Publishing Temp: %f \n ", varBodyTempF); 
+      feedvarbodytemperature.publish(varBodyTempF);
+      Serial.printf("Publishing Temp: %0.1f \n ", varBodyTempF); 
 
-        if(accelTotal>=2) {
-          feedvarfalls.publish(accelTotal);
-          Serial.printf("Publishing Fall detected \n");  
-        }
+      if(fallDetected) {
+        feedvarfalls.publish(fallValue);
+        Serial.printf("Publishing Fall detected \n"); 
+        fallDetected = false;
+        fallValue = 0.0; 
       }
-      lastPublishTime = millis();
     }
+    lastPublishTime = millis();
   }
 } 
 
@@ -320,6 +328,11 @@ void getMPUData(){
 
   accelTotal = sqrt(pow(accelXG,2)+pow(accelYG,2)+pow(accelZG,2));
   Serial.printf("Accel Total Value: %0.3f \n", accelTotal);
+
+  if(!fallDetected) {
+    fallValue = accelTotal;
+    fallDetected = (fallValue > fallThreshold);
+  }
 }  
 
 void getTemperature() {

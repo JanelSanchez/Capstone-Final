@@ -32,10 +32,10 @@
 	#define FLASH_STRING __FlashStringHelper
 #endif
 
-#if defined(ARDUINO_SAMD_ZERO) || defined(ARDUINO_STM32_FEATHER) || defined(SPARK)
-#define strncpy_P(dest, src, len) strncpy((dest), (src), (len))
-#define strncasecmp_P(f1, f2, len) strncasecmp((f1), (f2), (len))
-#endif
+// #if defined(ARDUINO_SAMD_ZERO) || defined(ARDUINO_STM32_FEATHER) || defined(SPARK)
+// #define strncpy_P(dest, src, len) strncpy((dest), (src), (len))
+// #define strncasecmp_P(f1, f2, len) strncasecmp((f1), (f2), (len))
+// #endif
 
 #define ADAFRUIT_MQTT_VERSION_MAJOR 0
 #define ADAFRUIT_MQTT_VERSION_MINOR 16
